@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>解谱犯键 - AI Auto Chart</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            color: #fff;
+            font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            user-select: none;
+            display: flex;
+            justify-content: center;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100%;
+            max-width: 700px; /* 稍微加宽以容纳更多UI */
+            height: 100%;
+            background: #111;
+            box-shadow: 0 0 50px rgba(0, 255, 255, 0.15);
+            overflow: hidden;
+        }
+
+        canvas { display: block; width: 100%; height: 100%; }
+
+        /* UI Styling */
+        .overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            display: flex;
+            flex-direction: row; /* 改为横向布局 */
+            justify-content: center; align-items: center;
+            z-index: 20;
+            transition: opacity 0.4s;
+            backdrop-filter: blur(8px);
+        }
+        .hidden { opacity: 0; pointer-events: none; }
+
+        /* Start Screen Layout */
+        .start-content {
+            display: flex;
+            flex-direction: row;
+            gap: 20px;
+            width: 90%;
+            max-width: 650px;
+            align-items: stretch;
+        }
+
+        /* Left Panel: Manual */
+        .manual-panel {
+            flex: 1;
+            background: rgba(0, 255, 255, 0.05);
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            padding: 20px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            color: #ccc;
+            line-height: 1.6;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+        .manual-title {
+            color: #00ffff;
+            font-weight: bold;
+            border-bottom: 1px solid #00ffff;
+            padding-bottom: 5px;
+            margin-bottom: 10px;
+            font-size: 1rem;
+            letter-spacing: 1px;
+        }
+        .manual-section {
+            margin-bottom: 15px;
+        }
+        .highlight { color: #ff0055; font-weight: bold; }
+
+        /* Right Panel: Controls */
+        .control-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(90deg, #ff0055, #00ffff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 5px;
+            text-align: center;
+        }
+
+        .btn {
+            background: rgba(0, 255, 255, 0.1);
+            border: 1px solid #00ffff;
+            color: #00ffff;
+            padding: 12px 20px;
+            font-size: 1rem;
+            cursor: pointer;
+            margin: 8px;
+            transition: 0.2s;
+            border-radius: 4px;
+            width: 100%;
+            text-align: center;
+        }
+        .btn:hover { background: #00ffff; color: #000; box-shadow: 0 0 15px #00ffff; }
+
+        /* Sliders & Toggles */
+        .settings-group {
+            margin: 10px 0;
+            text-align: center;
+            color: #aaa;
+            font-size: 0.9rem;
+            width: 100%;
+        }
+        input[type="range"] { accent-color: #ff0055; width: 100%; }
+
+        /* Loading Bar */
+        .loading-bar-container {
+            width: 100%; height: 4px; background: #333;
+            margin: 15px 0; border-radius: 2px; overflow: hidden;
+            display: none;
+        }
+        .loading-bar { width: 0%; height: 100%; background: #00ffff; transition: width 0.1s; }
+
+        /* HUD (In-Game) */
+        #hud {
+            position: absolute; top: 0; left: 0; width: 100%;
+            padding: 15px; box-sizing: border-box;
+            display: flex; justify-content: space-between;
+            align-items: flex-start;
+            pointer-events: none; z-index: 10;
+        }
+
+        /* In-Game Auto Toggle */
+        .ingame-toggle-container {
+            pointer-events: auto; /* Allow clicking */
+            display: flex;
+            align-items: center;
+            background: rgba(0,0,0,0.5);
+            padding: 5px 10px;
+            border: 1px solid #555;
+            border-radius: 20px;
+            backdrop-filter: blur(4px);
+        }
+        .toggle-switch {
+            position: relative;
+            width: 40px; height: 20px;
+            margin-left: 10px;
+        }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute; cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #333; transition: .4s;
+            border-radius: 20px;
+        }
+        .slider:before {
+            position: absolute; content: "";
+            height: 14px; width: 14px;
+            left: 3px; bottom: 3px;
+            background-color: white; transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider { background-color: #00ffff; }
+        input:checked + .slider:before { transform: translateX(20px); }
+
+        /* Score & Combo */
+        .score-val { font-size: 2rem; font-weight: 800; font-family: monospace; text-shadow: 0 0 5px rgba(255,255,255,0.5); }
+        .combo-box {
+            position: absolute; top: 40%; left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center; opacity: 0;
+            pointer-events: none;
+        }
+        .combo-box.active { opacity: 1; }
+        .combo-num { font-size: 4rem; font-weight: 900; color: rgba(255,255,255,0.1); -webkit-text-stroke: 2px #ff0055; }
+        
+        /* Judgement */
+        .judgement {
+            position: absolute; top: 60%; left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 2rem; font-weight: bold;
+            opacity: 0; z-index: 15; pointer-events: none;
+        }
+        @keyframes pop {
+            0% { transform: translate(-50%, -50%) scale(0.8); opacity: 0; }
+            50% { transform: translate(-50%, -50%) scale(1.2); opacity: 1; }
+            100% { transform: translate(-50%, -50%) scale(1.0); opacity: 0; }
+        }
+
+        /* Mobile Controls */
+        #file-input { display: none; }
+        #mobile-controls {
+            position: absolute; bottom: 0; left: 0; width: 100%; height: 30%;
+            z-index: 30; display: none;
+        }
+        .touch-zone { width: 25%; height: 100%; float: left; border-top: 1px solid rgba(255,255,255,0.05); }
+        .touch-zone:active { background: rgba(255,255,255,0.1); }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .start-content { flex-direction: column-reverse; }
+            .manual-panel { max-height: 150px; }
+            h1 { font-size: 1.8rem; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- In-Game HUD -->
+    <div id="hud">
+        <div>
+            <div style="font-size:0.7rem; color:#888; letter-spacing: 2px;">SCORE</div>
+            <div class="score-val" id="score-display">000000</div>
+        </div>
+        
+        <!-- Game Toggle for Auto Mode -->
+        <div class="ingame-toggle-container">
+            <span style="font-size:0.8rem; color:#fff;">无敌欣赏 (AUTO)</span>
+            <label class="toggle-switch">
+                <input type="checkbox" id="ingame-auto-toggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+    </div>
+
+    <div id="combo-container" class="combo-box">
+        <div class="combo-num" id="combo-display">0</div>
+    </div>
+    <div id="judgement-display" class="judgement"></div>
+
+    <!-- Start Screen with Manual -->
+    <div id="start-screen" class="overlay">
+        <div class="start-content">
+            
+            <!-- Left: System Manual -->
+            <div class="manual-panel">
+                <div class="manual-title">/// SYSTEM MANUAL 说明书</div>
+                
+                <div class="manual-section">
+                    <div style="color:#fff; font-weight:bold;">1. 核心玩法</div>
+                    当音符下落至底部判定线时，按下对应键位：<br>
+                    <span style="color:#00ffff">D / F / J / K</span> (或点击屏幕下方四区域)。
+                </div>
+
+                <div class="manual-section">
+                    <div style="color:#fff; font-weight:bold;">2. AI 生成引擎</div>
+                    本系统使用 FFT 算法实时分析音频的<span class="highlight">瞬时能量峰值</span>。无需预设谱面，任何 MP3 均可自动生成与节奏同步的关卡。
+                </div>
+
+                <div class="manual-section">
+                    <div style="color:#fff; font-weight:bold;">3. 无敌欣赏模式 (AUTO)</div>
+                    <span class="highlight">功能：</span>AI 将接管控制权，自动完美击打所有音符。<br>
+                    <span class="highlight">用途：</span>
+                    <ul>
+                        <li>欣赏音乐与谱面的结合效果。</li>
+                        <li>当谱面难度过高时，观察节奏点。</li>
+                        <li>单纯的听歌看特效模式。</li>
+                    </ul>
+                    <span style="color:#00ffff">提示：</span>游戏中可随时点击右上角开关切换此模式！
+                </div>
+            </div>
+
+            <!-- Right: Controls -->
+            <div class="control-panel">
+                <h1>DYSTOPIA Pt.2</h1>
+                <p style="color:#ff0055; letter-spacing:3px; font-size:0.7rem; margin-top:-5px;">AI CHART GENERATOR v3.5</p>
+                
+                <div class="settings-group">
+                    <label>生成密度: <span id="diff-val" style="color:#fff">正常</span></label><br>
+                    <input type="range" id="difficulty-slider" min="1" max="5" value="3">
+                </div>
+
+                <div id="loading-bar-container" class="loading-bar-container">
+                    <div id="loading-bar" class="loading-bar"></div>
+                </div>
+                <div id="status-text" style="color:#00ffff; height:20px; font-size:0.8rem; margin-bottom:10px;"></div>
+
+                <button class="btn" id="select-file-btn">📂 选择音乐并分析</button>
+                <button class="btn" id="start-default-btn" style="border-color:#444; color:#666; font-size:0.8rem;">(尝试加载默认路径)</button>
+                <input type="file" id="file-input" accept="audio/*">
+            </div>
+        </div>
+    </div>
+
+    <!-- Result Screen -->
+    <div id="result-screen" class="overlay hidden">
+        <div style="text-align:center;">
+            <h1 style="font-size:4rem;">FINISH</h1>
+            <p id="result-score" style="font-size:2rem; color:#fff; font-family:monospace;">000000</p>
+            <p id="result-detail" style="color:#aaa; margin-bottom:30px;">Max Combo: 0</p>
+            <button class="btn" onclick="location.reload()">AGAIN</button>
+        </div>
+    </div>
+
+    <div id="mobile-controls">
+        <div class="touch-zone" data-key="0"></div>
+        <div class="touch-zone" data-key="1"></div>
+        <div class="touch-zone" data-key="2"></div>
+        <div class="touch-zone" data-key="3"></div>
+    </div>
+</div>
+
+<script>
+    /**
+     * AI RHYTHM GAME ENGINE v3.5
+     * Updates: In-game Auto Toggle, Instruction Manual
+     */
+
+    // --- Config ---
+    const CONFIG = {
+        speed: 1000, // Scroll speed
+        leadTime: 2.0, // Pre-roll time
+        hitWindow: { perf: 0.05, good: 0.12, miss: 0.25 },
+        laneKeys: ['KeyD', 'KeyF', 'KeyJ', 'KeyK'],
+        colors: ['#00ffff', '#ffffff', '#ffffff', '#00ffff']
+    };
+
+    // --- System State ---
+    const sys = {
+        ctx: null, canvas: null, width: 0, height: 0,
+        audioCtx: null, audioBuffer: null, source: null, analyser: null,
+        notes: [], chart: [],
+        isPlaying: false, startTime: 0,
+        score: 0, combo: 0, maxCombo: 0,
+        autoMode: false, // AI Mode
+        inputState: [false, false, false, false],
+        frequencyData: new Uint8Array(128)
+    };
+
+    // --- DOM Elements ---
+    const els = {
+        hudToggle: document.getElementById('ingame-auto-toggle'),
+        status: document.getElementById('status-text'),
+        loader: document.getElementById('loading-bar'),
+        loaderCont: document.getElementById('loading-bar-container'),
+        diff: document.getElementById('difficulty-slider')
+    };
+
+    // --- Init ---
+    window.onload = () => {
+        sys.canvas = document.getElementById('gameCanvas');
+        sys.ctx = sys.canvas.getContext('2d');
+        resize();
+        window.addEventListener('resize', resize);
+        
+        if ('ontouchstart' in window) document.getElementById('mobile-controls').style.display = 'block';
+
+        // Buttons
+        document.getElementById('select-file-btn').onclick = () => document.getElementById('file-input').click();
+        document.getElementById('start-default-btn').onclick = () => loadAudio('music/music.mp3');
+        document.getElementById('file-input').onchange = (e) => {
+            if(e.target.files[0]) loadAudio(e.target.files[0]);
+        };
+
+        // Inputs
+        window.addEventListener('keydown', e => handleInput(e.code, true));
+        window.addEventListener('keyup', e => handleInput(e.code, false));
+        
+        document.querySelectorAll('.touch-zone').forEach((z, i) => {
+            z.addEventListener('touchstart', e => { e.preventDefault(); triggerLane(i); });
+            z.addEventListener('touchend', e => { e.preventDefault(); sys.inputState[i] = false; });
+        });
+
+        // Difficulty Slider
+        els.diff.oninput = (e) => {
+            const v = ["", "简单", "普通", "正常", "困难", "魔王"][e.target.value];
+            document.getElementById('diff-val').innerText = v;
+        };
+
+        // --- CORE UPDATE: In-Game Toggle Logic ---
+        // Ensure switch reflects current state
+        els.hudToggle.checked = sys.autoMode;
+        
+        // Listener for dynamic switching
+        els.hudToggle.onchange = (e) => {
+            sys.autoMode = e.target.checked;
+            // Visual Feedback
+            if(sys.autoMode) {
+                showJudge("AUTO ON", "#00ffff");
+            } else {
+                showJudge("AUTO OFF", "#aaa");
+            }
+        };
+
+        loop();
+    };
+
+    function resize() {
+        const p = sys.canvas.parentElement;
+        sys.width = sys.canvas.width = p.clientWidth;
+        sys.height = sys.canvas.height = p.clientHeight;
+    }
+
+    // --- Audio Engine ---
+    async function loadAudio(source) {
+        try {
+            updateStatus("初始化音频核心...", 10);
+            sys.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            
+            let arrayBuffer;
+            if (source instanceof File) {
+                arrayBuffer = await source.arrayBuffer();
+            } else {
+                updateStatus("下载音频流...", 30);
+                const res = await fetch(source);
+                if (!res.ok) throw new Error("无法读取文件，请使用'选择音乐'按钮");
+                arrayBuffer = await res.arrayBuffer();
+            }
+
+            updateStatus("解码并分析波形...", 60);
+            sys.audioBuffer = await sys.audioCtx.decodeAudioData(arrayBuffer);
+            
+            updateStatus("AI 生成谱面...", 90);
+            generateChartFromAudio(sys.audioBuffer);
+
+            updateStatus("READY", 100);
+            startGame();
+
+        } catch (e) {
+            console.error(e);
+            updateStatus("错误: " + e.message, 0);
+            els.status.style.color = "#ff0055";
+        }
+    }
+
+    // --- AI Chart Generator ---
+    function generateChartFromAudio(buffer) {
+        sys.chart = [];
+        const rawData = buffer.getChannelData(0);
+        const sampleRate = buffer.sampleRate;
+        
+        const diffVal = parseInt(els.diff.value);
+        // Tweak these values for gameplay balance
+        const thresholdMultiplier = 1.15 - (diffVal * 0.09); 
+        const minNoteDist = 0.28 - (diffVal * 0.05); 
+        
+        const step = Math.floor(sampleRate / 60); 
+        let localEnergy = 0;
+        let lastNoteTime = 0;
+
+        for (let i = 0; i < rawData.length; i += step) {
+            const time = i / sampleRate;
+            if (time < 2) continue; // Skip intro
+
+            let sum = 0;
+            for (let j = 0; j < 100 && i+j < rawData.length; j++) {
+                sum += rawData[i+j] * rawData[i+j];
+            }
+            const instantEnergy = Math.sqrt(sum / 100);
+            localEnergy = (localEnergy * 0.95) + (instantEnergy * 0.05);
+
+            if (instantEnergy > localEnergy * thresholdMultiplier && instantEnergy > 0.05) {
+                if (time - lastNoteTime > minNoteDist) {
+                    let lane = Math.floor(Math.random() * 4);
+                    // Double note chance on high energy
+                    if (instantEnergy > 0.3 && diffVal > 3 && Math.random() > 0.6) {
+                        sys.chart.push({ time: time, lane: lane, type: 'tap' });
+                        sys.chart.push({ time: time, lane: (lane+1)%4, type: 'tap' });
+                    } else {
+                        sys.chart.push({ time: time, lane: lane, type: 'tap' });
+                    }
+                    lastNoteTime = time;
+                }
+            }
+        }
+        console.log(`AI Generated ${sys.chart.length} notes`);
+    }
+
+    function updateStatus(text, progress) {
+        els.status.innerText = text;
+        els.loaderCont.style.display = 'block';
+        els.loader.style.width = progress + "%";
+    }
+
+    function startGame() {
+        setTimeout(() => {
+            document.getElementById('start-screen').classList.add('hidden');
+            
+            sys.source = sys.audioCtx.createBufferSource();
+            sys.source.buffer = sys.audioBuffer;
+            sys.analyser = sys.audioCtx.createAnalyser();
+            sys.analyser.fftSize = 256;
+            
+            sys.source.connect(sys.analyser);
+            sys.analyser.connect(sys.audioCtx.destination);
+            
+            sys.source.start(0);
+            sys.startTime = sys.audioCtx.currentTime;
+            sys.isPlaying = true;
+
+            sys.chartIndex = 0;
+            sys.notes = [];
+            
+            sys.source.onended = () => {
+                setTimeout(() => {
+                    sys.isPlaying = false;
+                    document.getElementById('result-screen').classList.remove('hidden');
+                    document.getElementById('result-score').innerText = sys.score.toString().padStart(6, '0');
+                    document.getElementById('result-detail').innerText = `Max Combo: ${sys.maxCombo}`;
+                }, 1500);
+            };
+        }, 500);
+    }
+
+    // --- Main Loop ---
+    function loop() {
+        requestAnimationFrame(loop);
+        
+        // BG Clear
+        sys.ctx.fillStyle = '#050505';
+        sys.ctx.fillRect(0, 0, sys.width, sys.height);
+
+        if (!sys.isPlaying) return;
+
+        const songTime = sys.audioCtx.currentTime - sys.startTime;
+
+        // Visualizer
+        if (sys.analyser) {
+            sys.analyser.getByteFrequencyData(sys.frequencyData);
+            const bars = 20;
+            const barW = sys.width / bars;
+            sys.ctx.fillStyle = 'rgba(0, 255, 255, 0.05)';
+            for(let i=0; i<bars; i++) {
+                const h = (sys.frequencyData[i*2] / 255) * (sys.height * 0.6);
+                sys.ctx.fillRect(i * barW, sys.height - h, barW - 2, h);
+            }
+            // Pulse on beat
+            if (sys.frequencyData[2] > 210) {
+                sys.ctx.fillStyle = `rgba(255, 0, 85, 0.15)`;
+                sys.ctx.fillRect(0,0, sys.width, sys.height);
+            }
+        }
+
+        const judgeY = sys.height * 0.85;
+        const laneW = sys.width / 4;
+
+        // Static UI
+        sys.ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        sys.ctx.lineWidth = 2;
+        for(let i=1; i<4; i++) {
+            sys.ctx.beginPath(); sys.ctx.moveTo(i*laneW, 0); sys.ctx.lineTo(i*laneW, sys.height); sys.ctx.stroke();
+        }
+        
+        sys.ctx.strokeStyle = '#00ffff';
+        sys.ctx.shadowBlur = 15; sys.ctx.shadowColor = '#00ffff';
+        sys.ctx.beginPath(); sys.ctx.moveTo(0, judgeY); sys.ctx.lineTo(sys.width, judgeY); sys.ctx.stroke();
+        sys.ctx.shadowBlur = 0;
+
+        // Key Feedback
+        for(let i=0; i<4; i++) {
+            if (sys.inputState[i]) {
+                const grd = sys.ctx.createLinearGradient(0, judgeY, 0, sys.height);
+                grd.addColorStop(0, 'rgba(255,255,255,0.4)');
+                grd.addColorStop(1, 'rgba(255,255,255,0)');
+                sys.ctx.fillStyle = grd;
+                sys.ctx.fillRect(i*laneW, judgeY, laneW, sys.height - judgeY);
+            }
+        }
+
+        // Spawn Notes
+        const travelTime = judgeY / CONFIG.speed;
+        while(sys.chartIndex < sys.chart.length) {
+            const note = sys.chart[sys.chartIndex];
+            if (note.time - songTime < travelTime) {
+                sys.notes.push({ ...note, active: true, hit: false });
+                sys.chartIndex++;
+            } else { break; }
+        }
+
+        // Draw Notes
+        for (let i = 0; i < sys.notes.length; i++) {
+            const n = sys.notes[i];
+            if (!n.active) continue;
+
+            const timeDiff = n.time - songTime;
+            const y = judgeY - (timeDiff * CONFIG.speed);
+
+            // --- AUTO MODE LOGIC (Updated to check dynamic flag) ---
+            if (sys.autoMode && timeDiff <= 0 && !n.hit) {
+                sys.inputState[n.lane] = true;
+                setTimeout(() => sys.inputState[n.lane] = false, 50); // Visual release
+                triggerHit(n, 0); 
+                continue;
+            }
+
+            if (y > -50 && y < sys.height + 50) {
+                const x = n.lane * laneW;
+                sys.ctx.fillStyle = CONFIG.colors[n.lane];
+                sys.ctx.shadowBlur = 15; sys.ctx.shadowColor = CONFIG.colors[n.lane];
+                sys.ctx.fillRect(x + 5, y - 10, laneW - 10, 20);
+                sys.ctx.fillStyle = '#fff';
+                sys.ctx.fillRect(x + 10, y - 4, laneW - 20, 8);
+                sys.ctx.shadowBlur = 0;
+            }
+
+            if (timeDiff < -CONFIG.hitWindow.miss && !n.hit) {
+                n.active = false;
+                sys.combo = 0;
+                showJudge("MISS", "#555");
+                updateHUD();
+            }
+        }
+        sys.notes = sys.notes.filter(n => n.active);
+    }
+
+    // --- Input & Logic ---
+    function handleInput(code, pressed) {
+        const idx = CONFIG.laneKeys.indexOf(code);
+        if (idx === -1) return;
+        sys.inputState[idx] = pressed;
+        if (pressed && !sys.autoMode) triggerLane(idx);
+    }
+
+    function triggerLane(lane) {
+        if (!sys.isPlaying || sys.autoMode) return;
+        sys.inputState[lane] = true;
+        const songTime = sys.audioCtx.currentTime - sys.startTime;
+        
+        for (let n of sys.notes) {
+            if (n.active && !n.hit && n.lane === lane) {
+                const diff = Math.abs(n.time - songTime);
+                if (diff < CONFIG.hitWindow.miss) {
+                    triggerHit(n, diff);
+                    return;
+                }
+            }
+        }
+    }
+
+    function triggerHit(note, diff) {
+        note.hit = true;
+        note.active = false;
+        if (diff < CONFIG.hitWindow.perf) {
+            sys.score += 300 + (sys.combo * 10);
+            sys.combo++;
+            showJudge("PERFECT", "#ff0055");
+        } else if (diff < CONFIG.hitWindow.good) {
+            sys.score += 100 + (sys.combo * 5);
+            sys.combo++;
+            showJudge("GOOD", "#00ffff");
+        } else {
+            sys.combo = 0;
+            showJudge("BAD", "#aaa");
+        }
+        if (sys.combo > sys.maxCombo) sys.maxCombo = sys.combo;
+        updateHUD();
+    }
+
+    function showJudge(text, color) {
+        const j = document.getElementById('judgement-display');
+        j.innerText = text;
+        j.style.color = color;
+        j.style.textShadow = `0 0 20px ${color}`;
+        j.style.animation = 'none';
+        j.offsetHeight; 
+        j.style.animation = 'pop 0.2s ease-out forwards';
+    }
+
+    function updateHUD() {
+        document.getElementById('score-display').innerText = sys.score.toString().padStart(6, '0');
+        const cBox = document.getElementById('combo-container');
+        const cNum = document.getElementById('combo-display');
+        cNum.innerText = sys.combo;
+        if (sys.combo > 5) {
+            cBox.classList.add('active');
+            cNum.style.transform = "scale(1.2)";
+            setTimeout(()=>cNum.style.transform = "scale(1)", 50);
+        } else {
+            cBox.classList.remove('active');
+        }
+    }
+</script>
+</body>
+</html>
